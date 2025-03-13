@@ -88,10 +88,33 @@ def process_csv_files():
             SKIP_DOWNLOAD = True
 
     if not SKIP_DOWNLOAD:
-        for file in csv_files:
-            file_url = f"{CSV_CIC_DATASET_URL}{file}"
-            save_path = os.path.join(RAW_CIC_CSV_PATH, file)
-            download_file(file_url, save_path)
+        with tqdm(
+            total=len(csv_files),
+            desc="Total CSV Files",
+            unit="file",
+            dynamic_ncols=True,
+        ) as file_pbar:
+            for file in csv_files:
+                file_url = f"{CSV_CIC_DATASET_URL}{file}"
+                save_path = os.path.join(RAW_CIC_CSV_PATH, file)
+
+                response = requests.get(file_url, stream=True)
+                total_size = int(response.headers.get("content-length", 0))
+
+                with open(save_path, "wb") as f, tqdm(
+                    total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    leave=False,
+                    dynamic_ncols=True,
+                    desc=f"Downloading {file}",
+                ) as progress_bar:
+                    for data in response.iter_content(chunk_size=1024):
+                        f.write(data)
+                        progress_bar.update(len(data))
+
+                file_pbar.update(1)
 
     print(f"[{SCRIPT_NAME}] Processing CSV files...")
     with tqdm(
@@ -161,14 +184,45 @@ def process_pcap_files():
     os.makedirs(RAW_CIC_PCAP_PATH, exist_ok=True)
 
     if not SKIP_DOWNLOAD:
+        all_pcap_files = []  # Store all found PCAP files for progress tracking
+
         for directory in pcap_dirs:
             dir_url = f"{PCAP_CIC_DATASET_URL}{directory}"
-
             pcap_files = get_files(dir_url, ".pcap")
+
             for file in pcap_files:
+                all_pcap_files.append((dir_url, file))
+
+        print(all_pcap_files)
+
+        print(f"[{SCRIPT_NAME}] Downloading {len(all_pcap_files)} PCAP files...")
+        with tqdm(
+            total=len(all_pcap_files),
+            desc="Total PCAP Files",
+            unit="file",
+            dynamic_ncols=True,
+        ) as file_pbar:
+            for dir_url, file in all_pcap_files:
                 file_url = f"{dir_url}{file}"
                 save_path = os.path.join(RAW_CIC_PCAP_PATH, file)
-                download_file(file_url, save_path)
+
+                response = requests.get(file_url, stream=True)
+                total_size = int(response.headers.get("content-length", 0))
+
+                with open(save_path, "wb") as f, tqdm(
+                    total=total_size,
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    leave=False,
+                    dynamic_ncols=True,
+                    desc=f"Downloading {file}",
+                ) as progress_bar:
+                    for data in response.iter_content(chunk_size=1024):
+                        f.write(data)
+                        progress_bar.update(len(data))
+
+                file_pbar.update(1)
 
     # If there is a merged PCAP file already, ask if it should be deleted
     if os.path.exists(PROCESSED_CIC_PCAP_FILE_PATH):
@@ -209,6 +263,13 @@ def process_pcap_files():
 
 def clean_data():
     """Delete data directories and files."""
+    # Confirm with the user before deleting
+    response = input(
+        f"[{SCRIPT_NAME}] Are you sure you want to delete all data directories and files? (y/n): "
+    )
+    if response.lower() != "y":
+        return
+
     print(f"[{SCRIPT_NAME}] Cleaning data directories and files...")
     start_time = time.time()
     # Remove all files and directories inside the raw dataset paths
