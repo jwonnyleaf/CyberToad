@@ -6,7 +6,8 @@ from tqdm import tqdm
 import time
 
 SCRIPT_NAME = "CyberToad - data.py"
-DATASET_URL = "http://cicresearch.ca/IOTDataset/CIC_IOT_Dataset2023/Dataset/CSV/MERGED_CSV/"
+CSV_CIC_DATASET_URL = "http://cicresearch.ca/IOTDataset/CIC_IOT_Dataset2023/Dataset/CSV/MERGED_CSV/"
+PCAP_CIC_DATASET_URL = "http://cicresearch.ca/IOTDataset/CIC_IOT_Dataset2023/Dataset/PCAP/"
 RAW_CIC_CSV_PATH = "./data/raw/CIC_IOT_CSV_Dataset"
 PROCESSED_CIC_CSV_FILE_PATH = "./data/processed/CIC_IOT_CSV_Dataset.csv"
 RAW_CIC_PCAP_PATH = "./data/raw/CIC_IOT_PCAP_Dataset"
@@ -16,11 +17,16 @@ PROCESSED_CIC_PCAP_PATH = "./data/processed/CIC_IOT_PCAP_Dataset"
 os.makedirs(RAW_CIC_CSV_PATH, exist_ok=True)
 os.makedirs(os.path.dirname(PROCESSED_CIC_CSV_FILE_PATH), exist_ok=True)
 
-def get_files(url):
+def get_files(url, ext="", type="file"):
     """Fetches a list of CSV files from the dataset URL."""
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    return [link.get('href') for link in soup.find_all('a') if link.get('href').endswith('.csv')]
+    if type == "file":
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        return [link.get('href') for link in soup.find_all('a') if link.get('href').endswith(ext)]
+    if type == "dir":
+        response = requests.get(url)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        return [link.get('href') for link in soup.find_all('a') if link.get('href').endswith('/') and not link.get('href').startswith('?')]
 
 def download_file(url, save_path):
     """Downloads a file from a URL with a progress bar."""
@@ -42,7 +48,7 @@ def download_file(url, save_path):
 def process_csv_files():
     """Combines the downloaded CSV files into a single DataFrame."""
     SKIP_DOWNLOAD = False
-    csv_files = get_files(DATASET_URL)
+    csv_files = get_files(CSV_CIC_DATASET_URL, ".csv")
     df_list = []
 
     # If files already exist in the directory, ask if they should be deleted
@@ -58,7 +64,7 @@ def process_csv_files():
 
     if not SKIP_DOWNLOAD:
         for file in csv_files:
-                file_url = f"{DATASET_URL}{file}"
+                file_url = f"{CSV_CIC_DATASET_URL}{file}"
                 save_path = os.path.join(RAW_CIC_CSV_PATH, file)
                 download_file(file_url, save_path)
     
@@ -92,7 +98,25 @@ def process_csv_files():
     print(f"\t* Dataset contains {combined_df.shape[0]} rows and {combined_df.shape[1]} columns.")
 
 def process_pcap_files():
-    pass
+    """Downloads all PCAP files."""
+    print(f"[{SCRIPT_NAME}] Fetching list of PCAP directories...")
+    pcap_dirs = get_files(PCAP_CIC_DATASET_URL, type="dir")
+    print(f"[{SCRIPT_NAME}] Found {len(pcap_dirs)} directories.")
+
+    for directory in pcap_dirs:
+        dir_url = f"{PCAP_CIC_DATASET_URL}{directory}"
+        save_dir = os.path.join(RAW_CIC_PCAP_PATH, directory)
+        os.makedirs(save_dir, exist_ok=True)
+
+        pcap_files = get_files(dir_url, ".pcap")
+        with tqdm(total=len(pcap_files), desc=f"Downloading PCAP files from {directory}", unit="file", dynamic_ncols=True) as pbar:
+            for file in pcap_files:
+                file_url = f"{dir_url}{file}"
+                save_path = os.path.join(save_dir, file)
+                download_file(file_url, save_path)
+                pbar.update(1)
+
+    print(f"[{SCRIPT_NAME}] PCAP files downloaded successfully.")
 
 def print_menu():
     print("""
