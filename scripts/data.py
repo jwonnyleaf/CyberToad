@@ -7,6 +7,7 @@ import time
 import subprocess
 from urllib.parse import urljoin, urlparse
 import shutil
+import numpy as np
 
 SCRIPT_NAME = "CyberToad - data.py"
 CSV_CIC_DATASET_URL = (
@@ -72,8 +73,18 @@ def download_file(url, save_path):
 
 def process_csv_files():
     """Combines the downloaded CSV files into a single DataFrame."""
+    # Prompt user for dataset size
+    try:
+        target_size = int(
+            input(
+                f"[{SCRIPT_NAME}] Enter target dataset size (e.g., 1000000 for 1M rows): "
+            ).replace(",", "")
+        )
+    except ValueError:
+        print(f"[{SCRIPT_NAME}] Invalid input. Using default size of 1000000 rows.")
+        target_size = 1_000_000
+
     SKIP_DOWNLOAD = False
-    csv_files = get_files(CSV_CIC_DATASET_URL, ".csv")
     df_list = []
 
     # If files already exist in the directory, ask if they should be deleted
@@ -88,6 +99,7 @@ def process_csv_files():
             SKIP_DOWNLOAD = True
 
     if not SKIP_DOWNLOAD:
+        csv_files = get_files(CSV_CIC_DATASET_URL, ".csv")
         with tqdm(
             total=len(csv_files),
             desc="Total CSV Files",
@@ -118,7 +130,7 @@ def process_csv_files():
 
     print(f"[{SCRIPT_NAME}] Processing CSV files...")
     with tqdm(
-        total=len(csv_files),
+        total=len(os.listdir(RAW_CIC_CSV_PATH)),
         desc="Processing CSV files",
         unit="file",
         dynamic_ncols=True,
@@ -126,6 +138,7 @@ def process_csv_files():
         for file in os.listdir(RAW_CIC_CSV_PATH):
             file_path = os.path.join(RAW_CIC_CSV_PATH, file)
             df = pd.read_csv(file_path)
+            df.replace([np.inf, -np.inf], np.nan, inplace=True)
             df.dropna(inplace=True)
             df_list.append(df)
             pbar.update(1)
@@ -154,12 +167,29 @@ def process_csv_files():
         combined_df = pd.concat(df_list, ignore_index=True)
         pbar.update(len(df_list))
 
-    combined_df.to_csv(PROCESSED_CIC_CSV_FILE_PATH, index=False)
+    label_col = next(
+        (col for col in combined_df.columns if col.lower() == "label"), None
+    )
+    if not label_col:
+        print(
+            f"[${SCRIPT_NAME}] No 'label' column found in the merged dataset. Aborting."
+        )
+        return
+    combined_df.rename(columns={label_col: "label"}, inplace=True)
+
+    num_classes = combined_df["label"].nunique()
+    samples_per_class = target_size // num_classes
+    balanced_df = combined_df.groupby("label", group_keys=False).apply(
+        lambda x: x.sample(min(len(x), samples_per_class))
+    )
+    balanced_df = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
+    balanced_df.to_csv(PROCESSED_CIC_CSV_FILE_PATH, index=False)
+
     print(
         f"[{SCRIPT_NAME}] Successfully merged {len(df_list)} CSV files into {PROCESSED_CIC_CSV_FILE_PATH} in {time.time() - start_time:.2f} seconds."
     )
     print(
-        f"\t* Dataset contains {combined_df.shape[0]} rows and {combined_df.shape[1]} columns."
+        f"\t* Dataset contains {balanced_df.shape[0]} rows and {balanced_df.shape[1]} columns."
     )
 
 
